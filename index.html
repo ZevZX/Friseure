@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hair Salons in Hamburg</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            height: calc(100% - 50px);
+            width: 100%;
+        }
+        #footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background-color: #f8f9fa;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+        }
+        .filter-group {
+            display: flex;
+            align-items: center;
+        }
+        .color-indicator {
+            width: 20px;
+            height: 20px;
+            display: inline-block;
+            margin-right: 5px;
+            border: 1px solid #000;
+            cursor: pointer;
+        }
+        #exportBtn {
+            padding: 5px 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="footer">
+        <div class="filter-group">
+            <label><span class="color-indicator" id="undoneColor"></span><input type="checkbox" id="showUndone" checked> Undone</label>
+            <label><span class="color-indicator" id="doneColor"></span><input type="checkbox" id="showDone" checked> Done</label>
+            <label><span class="color-indicator" id="noAnswerColor"></span><input type="checkbox" id="showNoAnswer" checked> No Answer</label>
+            <label><span class="color-indicator" id="appointmentColor"></span><input type="checkbox" id="showAppointment" checked> Appointment Made</label>
+        </div>
+        <button id="exportBtn">Export CSV</button>
+    </div>
+
+    <script>
+        var map = L.map('map').setView([53.5511, 9.9937], 13);
+    
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+    
+        var redIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
+        });
+    
+        L.marker([53.545502, 9.988500], {icon: redIcon}).addTo(map)
+            .bindPopup("<strong>Our Location</strong><br>Cremon 11");
+    
+        var markers = [];
+        var csvData;
+    
+        // Load status and colors from localStorage
+        var markerStatus = JSON.parse(localStorage.getItem('markerStatus')) || {};
+        var markerColors = JSON.parse(localStorage.getItem('markerColors')) || {
+            undone: 'blue',
+            done: 'green',
+            noAnswer: 'orange',
+            appointment: 'pink'
+        };
+    
+        function updateColorIndicators() {
+            document.getElementById('undoneColor').style.backgroundColor = markerColors.undone;
+            document.getElementById('doneColor').style.backgroundColor = markerColors.done;
+            document.getElementById('noAnswerColor').style.backgroundColor = markerColors.noAnswer;
+            document.getElementById('appointmentColor').style.backgroundColor = markerColors.appointment;
+        }
+    
+        updateColorIndicators();
+    
+        function createCustomIcon(color) {
+            return L.icon({
+                iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            });
+        }
+    
+        Papa.parse('places.csv', {
+            header: true,
+            download: true,
+            complete: function(results) {
+                csvData = results.data;
+                results.data.forEach(function(row, index) {
+                    if (row.Breite && row.Länge) {
+                        var status = markerStatus[index] || 'undone';
+                        var color = markerColors[status]; // Use the color from markerColors
+                        var marker = L.marker([parseFloat(row.Breite), parseFloat(row.Länge)], {
+                            icon: createCustomIcon(color) // Use the color here
+                        }).addTo(map);
+                        
+                        var popupContent = `
+                            <strong>${row.Name}</strong><br>
+                            ${row.Adresse}<br>
+                            Tel: ${row.Handynummer}<br>
+                            Rating: ${row.Bewertung}<br>
+                            <a href="${row['Website Url']}" target="_blank">Website</a><br>
+                            <button onclick="changeStatus(${index}, 'undone')">Undone</button>
+                            <button onclick="changeStatus(${index}, 'done')">Done</button>
+                            <button onclick="changeStatus(${index}, 'noAnswer')">No Answer</button>
+                            <button onclick="changeStatus(${index}, 'appointment')">Appointment Made</button>
+                        `;
+                        marker.bindPopup(popupContent);
+                        markers.push({marker: marker, status: status});
+                    }
+                });
+                filterMarkers();
+            }
+        });
+    
+        function changeStatus(index, status) {
+            markers[index].status = status;
+            markers[index].marker.setIcon(createCustomIcon(markerColors[status]));
+            markerStatus[index] = status;
+            localStorage.setItem('markerStatus', JSON.stringify(markerStatus));
+            filterMarkers();
+        }
+
+        function filterMarkers() {
+            var showUndone = document.getElementById('showUndone').checked;
+            var showDone = document.getElementById('showDone').checked;
+            var showNoAnswer = document.getElementById('showNoAnswer').checked;
+            var showAppointment = document.getElementById('showAppointment').checked;
+
+            markers.forEach(function(markerObj) {
+                if ((markerObj.status === 'undone' && showUndone) ||
+                    (markerObj.status === 'done' && showDone) ||
+                    (markerObj.status === 'noAnswer' && showNoAnswer) ||
+                    (markerObj.status === 'appointment' && showAppointment)) {
+                    map.addLayer(markerObj.marker);
+                } else {
+                    map.removeLayer(markerObj.marker);
+                }
+            });
+        }
+
+        document.getElementById('showUndone').addEventListener('change', filterMarkers);
+        document.getElementById('showDone').addEventListener('change', filterMarkers);
+        document.getElementById('showNoAnswer').addEventListener('change', filterMarkers);
+        document.getElementById('showAppointment').addEventListener('change', filterMarkers);
+
+        document.querySelectorAll('.color-indicator').forEach(function(indicator) {
+        indicator.addEventListener('click', function() {
+            var status = this.id.replace('Color', '');
+            var color = prompt('Enter new color (blue, green, orange, pink, red, yellow, violet, grey, or black):', markerColors[status]);
+            if (color && ['blue', 'green', 'orange', 'pink', 'red', 'yellow', 'violet', 'grey', 'black'].includes(color)) {
+                markerColors[status] = color;
+                localStorage.setItem('markerColors', JSON.stringify(markerColors));
+                updateColorIndicators();
+                markers.forEach(function(markerObj, index) {
+                    if (markerObj.status === status) {
+                        markerObj.marker.setIcon(createCustomIcon(color));
+                    }
+                });
+            } else {
+                alert('Invalid color. Please choose from: blue, green, orange, pink, red, yellow, violet, grey, or black.');
+            }
+        });
+    });
+
+        document.getElementById('exportBtn').addEventListener('click', function() {
+            var exportData = csvData.map(function(row, index) {
+                return {...row, Status: markerStatus[index] || 'undone'};
+            });
+            var csv = Papa.unparse(exportData);
+            var blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+            var link = document.createElement("a");
+            if (link.download !== undefined) {
+                var url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", "exported_data.csv");
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        });
+    </script>
+</body>
+</html>
